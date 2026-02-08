@@ -56,18 +56,16 @@ Safety fallback:
 """
 
 
-def truncate_text(text, max_words, url):
+def truncate_to_words(text, max_words):
     """
-    Truncate text to a maximum number of words.
-    If truncated, appends a "Read more" link.
+    Truncate text to a maximum number of words (without adding any suffix).
     
     Args:
         text: The text to potentially truncate
         max_words: Maximum number of words to keep
-        url: The article URL to include in the "Read more" link
     
     Returns:
-        tuple: (truncated_text, was_truncated)
+        tuple: (text, was_truncated)
     """
     words = text.split()
     
@@ -76,10 +74,6 @@ def truncate_text(text, max_words, url):
     
     # Take first max_words and rejoin
     truncated = " ".join(words[:max_words])
-    
-    # Add the "Read more" suffix
-    truncated += f"\n\n[Read more at: {url}]"
-    
     return (truncated, True)
 
 
@@ -181,17 +175,23 @@ def extract():
             "url": url
         }), 422
 
+    # --- Calculate word count from full article ---
+    word_count = len(raw_text.split())
+
+    # --- Truncate BEFORE sending to AI (saves tokens) ---
+    text_for_processing, was_truncated = truncate_to_words(raw_text, MAX_OUTPUT_WORDS)
+
     # --- OpenAI formatting (best-effort, not required) ---
     ai_used = False
     ai_error = None
-    formatted_text = raw_text  # Default: use raw text
+    formatted_text = text_for_processing  # Default: use (possibly truncated) raw text
     
-    # Check if article is too long for OpenAI
-    if len(raw_text) > MAX_AI_INPUT_CHARS:
-        ai_error = f"Skipped: article exceeds {MAX_AI_INPUT_CHARS} character limit ({len(raw_text)} chars)"
+    # Check if article is too long for OpenAI (by character count)
+    if len(text_for_processing) > MAX_AI_INPUT_CHARS:
+        ai_error = f"Skipped: article exceeds {MAX_AI_INPUT_CHARS} character limit ({len(text_for_processing)} chars)"
     else:
         # Attempt OpenAI formatting with retry
-        result, error = call_openai_with_retry(raw_text, max_retries=1)
+        result, error = call_openai_with_retry(text_for_processing, max_retries=1)
         
         if result:
             # Success: use AI-formatted text
@@ -201,12 +201,9 @@ def extract():
             # Failure: keep raw text, record the error
             ai_error = error
 
-    # --- Truncate if over word limit ---
-    formatted_text, was_truncated = truncate_text(formatted_text, MAX_OUTPUT_WORDS, url)
-
-    # --- Calculate word count from the final text (before truncation suffix) ---
-    # We count from the original to get accurate article length
-    word_count = len(raw_text.split())
+    # --- Add "Read more" suffix if article was truncated ---
+    if was_truncated:
+        formatted_text += f"\n\n[Read more at: {url}]"
 
     # --- Build successful response ---
     # Note: ok=True as long as extraction succeeded (AI is best-effort)
