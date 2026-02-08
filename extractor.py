@@ -10,7 +10,10 @@ app = Flask(__name__)
 
 # --- Configuration ---
 # Maximum characters to send to OpenAI (prevents timeouts on very long articles)
-MAX_AI_INPUT_CHARS = 18000
+MAX_AI_INPUT_CHARS = 23000
+
+# Maximum words to include in output (truncate longer articles)
+MAX_OUTPUT_WORDS = 2000
 
 # Realistic browser User-Agent to avoid being blocked by websites
 USER_AGENT = (
@@ -51,6 +54,33 @@ Output requirement:
 Safety fallback:
 - If unsure, return the input text unchanged.
 """
+
+
+def truncate_text(text, max_words, url):
+    """
+    Truncate text to a maximum number of words.
+    If truncated, appends a "Read more" link.
+    
+    Args:
+        text: The text to potentially truncate
+        max_words: Maximum number of words to keep
+        url: The article URL to include in the "Read more" link
+    
+    Returns:
+        tuple: (truncated_text, was_truncated)
+    """
+    words = text.split()
+    
+    if len(words) <= max_words:
+        return (text, False)
+    
+    # Take first max_words and rejoin
+    truncated = " ".join(words[:max_words])
+    
+    # Add the "Read more" suffix
+    truncated += f"\n\n[Read more at: {url}]"
+    
+    return (truncated, True)
 
 
 def call_openai_with_retry(text, max_retries=1):
@@ -171,8 +201,12 @@ def extract():
             # Failure: keep raw text, record the error
             ai_error = error
 
-    # --- Calculate word count from the final text ---
-    word_count = len(formatted_text.split())
+    # --- Truncate if over word limit ---
+    formatted_text, was_truncated = truncate_text(formatted_text, MAX_OUTPUT_WORDS, url)
+
+    # --- Calculate word count from the final text (before truncation suffix) ---
+    # We count from the original to get accurate article length
+    word_count = len(raw_text.split())
 
     # --- Build successful response ---
     # Note: ok=True as long as extraction succeeded (AI is best-effort)
@@ -180,11 +214,11 @@ def extract():
         "ok": True,
         "url": url,
         "title": article.title,
-        "text_raw": raw_text,
         "text_ai_formatted": formatted_text,
         "ai_used": ai_used,
         "ai_error": ai_error,
         "word_count": word_count,
+        "truncated": was_truncated,
         "top_image": article.top_image,
         "authors": article.authors,
         "publish_date": article.publish_date.isoformat() if article.publish_date else None,
