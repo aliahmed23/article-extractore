@@ -105,11 +105,15 @@ def extract():
             "details": str(e)
         }), 502
 
+    # Count words by splitting on whitespace
+    word_count = len(formatted_text.split())
+
     return jsonify({
         "ok": True,
         "url": url,
         "title": article.title,
         "text": formatted_text,
+        "word_count": word_count,
         "top_image": article.top_image,
         "authors": article.authors,
         "publish_date": article.publish_date.isoformat() if article.publish_date else None,
